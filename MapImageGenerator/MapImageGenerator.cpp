@@ -10,6 +10,8 @@
 #include <random>
 #include "shlwapi.h"
 #include <shellapi.h>
+#include <shobjidl.h>
+#include <atlcomcli.h>
 
 #define MAX_LOADSTRING 100
 #define MAX_RECENT_FILES 5
@@ -108,6 +110,7 @@ bool readRecentFiles();
 void UpdateRecentFilesMenu();
 static void CustomHandleMouseWheel(HWND, int, BOOL);
 void setLanguage(LCID);
+void OnProjectSave();
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -239,12 +242,12 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 
    // setup bitmap info   
    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-   bmi.bmiHeader.biWidth = 500;
-   bmi.bmiHeader.biHeight = 500;
+   bmi.bmiHeader.biWidth = 1000;
+   bmi.bmiHeader.biHeight = 1000;
    bmi.bmiHeader.biPlanes = 1;
    bmi.bmiHeader.biBitCount = 32;
    bmi.bmiHeader.biCompression = BI_RGB;
-   bmi.bmiHeader.biSizeImage = 500 * 500 * 4;
+   bmi.bmiHeader.biSizeImage = 1000 * 1000 * 4;
 
    hwndTab = DoCreateTabControl(hWnd);
    hwndDisplay = DoCreateDisplayWindow(hwndTab);
@@ -516,34 +519,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 wcscpy(project.seed, seedText);
 
                 if (wcslen(szFileName) == 0) {
-                    OPENFILENAME ofn;
-
-                    ZeroMemory(&ofn, sizeof(ofn));
-
-                    //after getsavefilename succeeds it copies the path to project name
-                    //and i don't know a better way of preventing that
-                    wchar_t file[64] = L"";
-                    wcscpy(file, project.name);
-
-                    ofn.lStructSize = sizeof(ofn);
-                    ofn.hwndOwner = hWnd;
-                    ofn.lpstrFilter = L"Dat Files (*.dat)\0*.dat\0All Files (*.*)\0*.*\0";
-                    ofn.lpstrFile = file;
-                    ofn.nMaxFile = MAX_PATH;
-                    ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
-                    ofn.lpstrDefExt = L"dat";
-
-                    if (GetSaveFileName(&ofn))
-                    {
-                        if (!SaveProject(ofn.lpstrFile)) {
-                            LoadString(hInst, IDS_SAVEFAIL, achTemp, sizeof(achTemp) / sizeof(achTemp[0]));
-                            MessageBox(hWnd, achTemp, L"Saving error", MB_OK | MB_ICONERROR);
-                            break;
-                        }
-                        wcscpy(szFileName, ofn.lpstrFile);
-                        writeRecentFile(szFileName);
-                        //wcscpy(szExportFileName, L"");
-                    }
+                    OnProjectSave();
                     break;
                 }
                 if (!SaveProject(szFileName)) {
@@ -563,82 +539,75 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     break;
                 }
 
-                OPENFILENAME ofn;
+                wchar_t seedText[25];
+                SendMessage(hSeedText, WM_GETTEXT, 25, (LPARAM)seedText);
 
-                ZeroMemory(&ofn, sizeof(ofn));
+                project.width = ImgGen->getWidht();
+                project.height = ImgGen->getHeight();
+                project.waterLvl = ImgGen->waterLvl;
+                project.mountainLvl = ImgGen->mountainLvl;
+                project.coldLvl = ImgGen->coldLvl;
+                project.warmLvl = ImgGen->warmLvl;
+                project.dryLvl = ImgGen->dryLvl;
+                project.humidLvl = ImgGen->humidLvl;
+                project.genBeach = beachChecked;
+                project.genLava = lavaChecked;
+                wcscpy(project.seed, seedText);
 
-                wchar_t file[64] = L"";
-                wcscpy(file, project.name);
-
-                ofn.lStructSize = sizeof(ofn);
-                ofn.hwndOwner = hWnd;
-                ofn.lpstrFilter = L"Dat Files (*.dat)\0*.dat\0All Files (*.*)\0*.*\0";
-                ofn.lpstrFileTitle = file;
-                ofn.nMaxFile = MAX_PATH;
-                ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
-                ofn.lpstrDefExt = L"dat";
-
-                if (GetSaveFileName(&ofn))
-                {
-                    wchar_t seedText[25];
-
-                    SendMessage(hSeedText, WM_GETTEXT, 25, (LPARAM)seedText);
-
-                    project.width = ImgGen->getWidht();
-                    project.height = ImgGen->getHeight();
-                    project.waterLvl = ImgGen->waterLvl;
-                    project.mountainLvl = ImgGen->mountainLvl;
-                    project.coldLvl = ImgGen->coldLvl;
-                    project.warmLvl = ImgGen->warmLvl;
-                    project.dryLvl = ImgGen->dryLvl;
-                    project.humidLvl = ImgGen->humidLvl;
-                    project.genBeach = beachChecked;
-                    project.genLava = lavaChecked;
-                    wcscpy(project.seed, seedText);
-
-                    if (!SaveProject(ofn.lpstrFile)) {
-                        LoadString(hInst, IDS_SAVEFAIL, achTemp, sizeof(achTemp) / sizeof(achTemp[0]));
-                        MessageBox(hWnd, achTemp, L"Saving error", MB_OK | MB_ICONERROR);
-                        break;
-                    }
-                    writeRecentFile(szFileName);
-
-                    wcscpy(szFileName, ofn.lpstrFile);
-                    //wcscpy(szExportFileName, L"");
-                    //MessageBox(hWnd, szFileName, L"filename", MB_OK | MB_ICONINFORMATION);
-                }
+                OnProjectSave();
 
                 break;
             }
             case IDM_OPEN:
             {
-                OPENFILENAME ofn;
-                ZeroMemory(&ofn, sizeof(ofn));
+                HRESULT hr;
+                CComPtr<IFileOpenDialog> pDlg;
+                COMDLG_FILTERSPEC aFileTypes[] = {
+                    { L"Dat files", L"*.dat" },
+                    { L"All files", L"*.*" }
+                };
 
-                ofn.lStructSize = sizeof(ofn);
-                ofn.hwndOwner = hWnd;
-                ofn.lpstrFilter = L"Dat Files (*.dat)\0*.dat\0All Files (*.*)\0*.*\0";
-                ofn.lpstrFile = szFileName;
-                ofn.nMaxFile = MAX_PATH;
-                ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
-                ofn.lpstrDefExt = L"dat";
+                hr = pDlg.CoCreateInstance(__uuidof(FileOpenDialog));
+                if (FAILED(hr))
+                    break;
 
-                if (GetOpenFileName(&ofn)) {
-                    
-                    if (!LoadProject(szFileName)) {
-                        LoadString(hInst, IDS_OPENFAIL, achTemp, sizeof(achTemp) / sizeof(achTemp[0]));
-                        MessageBox(hWnd, achTemp, L"Opening error", MB_OK | MB_ICONERROR);
-                        break;
-                    }
+                pDlg->SetFileTypes(_countof(aFileTypes), aFileTypes);
+                pDlg->SetTitle(L"Open project");
 
-                    EnableControls(false);
+                hr = pDlg->Show(hWnd);
 
-                    hGenerateMapThread = CreateThread(NULL, 0, GenerateOpenMapThread, NULL, 0, NULL);
-                    if (hGenerateMapThread == NULL) {
-                        ExitProcess(3);
+                if (SUCCEEDED(hr))
+                {
+                    CComPtr<IShellItem> pItem;
+
+                    hr = pDlg->GetResult(&pItem);
+
+                    if (SUCCEEDED(hr))
+                    {
+                        LPOLESTR pwsz = NULL;
+
+                        hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pwsz);
+
+                        if (SUCCEEDED(hr))
+                        {
+                            if (!LoadProject(pwsz)) {
+                                LoadString(hInst, IDS_OPENFAIL, achTemp, sizeof(achTemp) / sizeof(achTemp[0]));
+                                MessageBox(hWnd, achTemp, L"Opening error", MB_OK | MB_ICONERROR);
+                                break;
+                            }
+                            wcscpy(szFileName, pwsz);
+                            writeRecentFile(szFileName);
+
+                            EnableControls(false);
+
+                            hGenerateMapThread = CreateThread(NULL, 0, GenerateOpenMapThread, NULL, 0, NULL);
+                            if (hGenerateMapThread == NULL) {
+                                ExitProcess(3);
+                            }
+                            CoTaskMemFree(pwsz);
+                        }
                     }
                 }
-
                 break;
             }
             case IDM_RECENT_FILE0 + 1:
@@ -664,6 +633,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                         }
 
                         wcscpy(szFileName, recentFiles[index - 1]);
+                        writeRecentFile(szFileName);
                     }
                 }
                 else {
@@ -683,32 +653,53 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
                 size_t i;
                 char* f = new char[MAX_PATH];
-                //if (wcslen(szExportFileName) == 0) {
-                OPENFILENAME ofn;
+                HRESULT hr;
+                CComPtr<IFileSaveDialog> pDlg;
+                COMDLG_FILTERSPEC aFileTypes[] = {
+                    { L"Bmp files", L"*.bmp" },
+                    { L"All files", L"*.*" }
+                };
 
-                ZeroMemory(&ofn, sizeof(ofn));
+                // Create the file-save dialog COM object.
+                hr = pDlg.CoCreateInstance(__uuidof(FileSaveDialog));
 
-                wchar_t file[64] = L"";
-                wcscpy(file, project.name);
+                if (FAILED(hr))
+                    break;
 
-                ofn.lStructSize = sizeof(ofn);
-                ofn.hwndOwner = hWnd;
-                ofn.lpstrFilter = L"Bmp Files (*.bmp)\0*.bmp\0All Files (*.*)\0*.*\0";
-                ofn.lpstrFile = file;
-                ofn.nMaxFile = MAX_PATH;
-                ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
-                ofn.lpstrDefExt = L"bmp";
+                // Set the dialog's caption text, file types, Save button label,
+                // default file name, and default extension.
+                // NOTE: Error handling omitted here for clarity.
+                pDlg->SetFileTypes(_countof(aFileTypes), aFileTypes);
+                pDlg->SetTitle(L"Export as");
+                pDlg->SetOkButtonLabel(L"Export");
+                pDlg->SetFileName(project.name);
+                pDlg->SetDefaultExtension(L"bmp");
 
-                if (GetSaveFileName(&ofn))
+                // Show the dialog.
+                hr = pDlg->Show(hWnd);
+
+                // If the user chose a file, save the user's data to that file.
+                if (SUCCEEDED(hr))
                 {
-                    wcstombs_s(&i, f, (size_t)MAX_PATH, ofn.lpstrFile, (size_t)MAX_PATH - 1);
-                    ImgGen->createImage(f);
-                    //wcscpy(szExportFileName, ofn.lpstrFile);
+                    CComPtr<IShellItem> pItem;
+
+                    hr = pDlg->GetResult(&pItem);
+
+                    if (SUCCEEDED(hr))
+                    {
+                        LPOLESTR pwsz = NULL;
+
+                        hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pwsz);
+
+                        if (SUCCEEDED(hr))
+                        {
+                            //TODO: Save the file here, 'pwsz' has the full path
+                            wcstombs_s(&i, f, (size_t)MAX_PATH, pwsz, (size_t)MAX_PATH - 1);
+                            ImgGen->createImage(f);
+                            CoTaskMemFree(pwsz);
+                        }
+                    }
                 }
-                break;
-                //}
-                //wcstombs_s(&i, f, (size_t)MAX_PATH, szExportFileName, (size_t)MAX_PATH - 1);
-                //ImgGen->createImage(f);
                 delete[] f;
                 break;
             }
@@ -869,7 +860,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hWnd, &ps);
-            // TODO: Add any drawing code that uses hdc here...
             EndPaint(hWnd, &ps);
         }
         break;
@@ -878,7 +868,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         ReleaseDC(hwndDisplay, hdcMemHumid);
         ReleaseDC(hwndDisplay, hdcMemTemp);
         ReleaseDC(hwndDisplay, hdcMemFin);
-        CloseHandle(hGenerateMapThread);
+        CloseHandle(hGenerateMapThread);  
         PostQuitMessage(0);
         break;
     default:
@@ -1140,6 +1130,14 @@ LRESULT CALLBACK DisplayWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM l
         int h = ImgGen->getHeight();
         int left = (500 - w) / 2;
         int top = (500 - h) / 2;
+        if (w > 500) {
+            w = 500;
+            left = 0;
+        }
+        if (h > 500) { 
+            h = 500;
+            top = 0;
+        }
         switch (iPage) {
         case 0:
             SelectObject(hdc, height);
@@ -1394,14 +1392,14 @@ INT_PTR CALLBACK CreateNewProject(HWND hDlg, UINT message, WPARAM wParam, LPARAM
             int widthNumber = _wtoi(width);
             int heightNumber = _wtoi(height);
 
-            std::wregex number3digit(L"^[0-9]{1,3}$");
+            std::wregex number4digit(L"^[0-9]{1,4}$");
 
-            if (!std::regex_match(width, number3digit) || widthNumber > 500) {
+            if (!std::regex_match(width, number4digit) || widthNumber > 1000) {
                 LoadString(hInst, IDS_VALWIDTHSIZE, achTemp, sizeof(achTemp) / sizeof(achTemp[0]));
                 MessageBox(hDlg, achTemp, L"Validation_Error", MB_OK | MB_ICONWARNING);
                 return (INT_PTR)TRUE;
             }
-            if (!std::regex_match(height, number3digit) || heightNumber > 500) {
+            if (!std::regex_match(height, number4digit) || heightNumber > 1000) {
                 LoadString(hInst, IDS_VALHEIGHTSIZE, achTemp, sizeof(achTemp) / sizeof(achTemp[0]));
                 MessageBox(hDlg, achTemp, L"Validation_Error", MB_OK | MB_ICONWARNING);
                 return (INT_PTR)TRUE;
@@ -2332,6 +2330,11 @@ DWORD WINAPI GenerateOpenMapThread(LPVOID lpParam) {
     SendMessage(hProgressBar, PBM_SETRANGE, 0, MAKELPARAM(0, 6));
     SendMessage(hProgressBar, PBM_SETSTEP, (WPARAM)1, 0);
 
+
+    if (ImgGen)
+        delete ImgGen;
+    ImgGen = new generateImage(project.height, project.width);
+
     ImgGen->createHeightMap(hdcMemHei, _wtoi(seedHei));
     SendMessage(hProgressBar, PBM_STEPIT, 0, 0);
     ImgGen->createTempMap(0, 0, hdcMemTemp, _wtoi(seedTemp));
@@ -2730,5 +2733,50 @@ void setLanguage(LCID lang) {
         }
 
         InvalidateRect(hPaletteWindow, NULL, true);
+    }
+}
+
+void OnProjectSave()
+{
+    HRESULT hr;
+    CComPtr<IFileSaveDialog> pDlg;
+    COMDLG_FILTERSPEC aFileTypes[] = {
+        { L"Dat files", L"*.dat" },
+        { L"All files", L"*.*" }
+    };
+
+    hr = pDlg.CoCreateInstance(__uuidof(FileSaveDialog));
+
+    if (FAILED(hr))
+        return;
+
+    pDlg->SetFileTypes(_countof(aFileTypes), aFileTypes);
+    pDlg->SetTitle(L"Save as");
+    pDlg->SetOkButtonLabel(L"Save");
+    pDlg->SetFileName(project.name);
+    pDlg->SetDefaultExtension(L"dat");
+
+    hr = pDlg->Show(hWnd);
+
+    if (SUCCEEDED(hr))
+    {
+        CComPtr<IShellItem> pItem;
+
+        hr = pDlg->GetResult(&pItem);
+
+        if (SUCCEEDED(hr))
+        {
+            LPOLESTR pwsz = NULL;
+
+            hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pwsz);
+
+            if (SUCCEEDED(hr))
+            {
+                SaveProject(pwsz);
+                wcscpy(szFileName, pwsz);
+                writeRecentFile(szFileName);
+                CoTaskMemFree(pwsz);
+            }
+        }
     }
 }

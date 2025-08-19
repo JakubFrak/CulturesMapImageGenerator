@@ -175,7 +175,13 @@ void generateImage::MakeBitmap(unsigned char*** map, HDC hdc)
     }
     
     SelectObject(hdcMem, answer);
-    BitBlt(hdc, 0, 0, width, height, hdcMem, 0, 0, SRCCOPY);
+    if (width > 500 || height > 500) {
+        SetStretchBltMode(hdc, COLORONCOLOR);
+        StretchBlt(hdc, 0, 0, 500, 500, hdcMem, 0, 0, width, height, SRCCOPY);
+    }
+    else {
+        BitBlt(hdc, 0, 0, width, height, hdcMem, 0, 0, SRCCOPY);
+    }
 
     DeleteDC(hdcMem);
     DeleteObject(answer);
